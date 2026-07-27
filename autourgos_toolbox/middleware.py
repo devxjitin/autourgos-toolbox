@@ -13,6 +13,36 @@ from typing import Any, Dict, List, Optional, Set, Union
 from .base import CallbackHandler, StructuredTool, build_tool_list, register_tool
 
 
+def _to_agent_tool_dict(tool: Any) -> Any:
+    """
+    Convert a StructuredTool / plain callable / already-shaped dict into the
+    real ``ReactAgent`` tool dict shape (``{"name", "description",
+    "parameters", "func"}``) expected by ``agent.tools`` / ``agent.add_tools``.
+
+    react-agent's own tool list is a list of plain dicts (see its "Tool Dict
+    Reference"), not StructuredTool instances or raw callables — passing
+    those straight through used to silently corrupt agent.tools and break
+    the loop's ``t["name"]`` lookups the first time the LLM actually tried to
+    call the tool.
+    """
+    if isinstance(tool, dict) and "name" in tool:
+        return tool
+    if isinstance(tool, StructuredTool):
+        return {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.args_schema,
+            "func": tool.func,
+        }
+    if callable(tool):
+        registry: Dict[str, Dict[str, Any]] = {}
+        register_tool(registry, tool)
+        (name, info), = registry.items()
+        return {"name": name, "description": info["description"],
+                "parameters": info["parameters"], "func": info["func"]}
+    return tool
+
+
 class Toolbox:
     """
     A named group of tools that can be lazy-loaded into an agent at runtime.
@@ -96,12 +126,13 @@ class ToolboxMiddleware(CallbackHandler):
         self,
         toolboxes: Optional[Union[List[Toolbox], Dict[str, Dict[str, Any]]]] = None,
     ) -> None:
-        self.logger    = logging.getLogger("autourgos.toolbox")
+        self.logger    = logging.getLogger(__name__)
         self.toolboxes: Dict[str, Toolbox] = {}
         self._exposed:  Set[str]           = set()
+        self._exposed_tools: Set[str]      = set()
 
         self._agent:                   Optional[Any] = None
-        self._initial_tools:           Optional[Dict[str, Dict[str, Any]]] = None
+        self._initial_tools:           Optional[List[Any]] = None
         self._initial_system_prompt:   Optional[str] = None
         self._initial_prompt_template: Optional[str] = None
 
@@ -130,9 +161,10 @@ class ToolboxMiddleware(CallbackHandler):
 
         self._agent  = agent
         self._exposed = set()
+        self._exposed_tools = set()
 
         # snapshot original state for restore
-        self._initial_tools           = dict(agent.tools) if hasattr(agent, "tools") else {}
+        self._initial_tools           = list(agent.tools) if hasattr(agent, "tools") else []
         self._initial_system_prompt   = getattr(agent, "system_prompt", None)
         self._initial_prompt_template = getattr(agent, "prompt_template", None)
 
@@ -145,17 +177,33 @@ class ToolboxMiddleware(CallbackHandler):
             """
             return self._expose_toolbox_action(toolbox_name)
 
+        def expose_tool(tool_name: str) -> str:
+            """Expose a single tool by name, searching across all registered toolboxes.
+
+            Args:
+                tool_name: The exact name of the tool to expose (e.g. 'create_pr'). This
+                    does not require knowing which toolbox the tool lives in.
+            """
+            return self._expose_tool_action(tool_name)
+
         expose_toolbox_tool = StructuredTool.from_function(
             func=expose_toolbox,
             name="expose_toolbox",
             description="Expose all tools in the specified toolbox, making them available for you to use.",
         )
         expose_tool_tool = StructuredTool.from_function(
-            func=expose_toolbox,
+            func=expose_tool,
             name="expose_tool",
-            description="Expose all tools in the specified toolbox, making them available for you to use.",
+            description=(
+                "Expose a single tool by name (searched across all registered toolboxes), "
+                "making just that tool available for you to use without loading the rest "
+                "of its toolbox."
+            ),
         )
-        agent.add_tools(expose_toolbox_tool, expose_tool_tool)
+        agent.add_tools(
+            _to_agent_tool_dict(expose_toolbox_tool),
+            _to_agent_tool_dict(expose_tool_tool),
+        )
 
         # inject toolbox catalog into system prompt
         if self.toolboxes:
@@ -197,7 +245,7 @@ class ToolboxMiddleware(CallbackHandler):
             return f"Toolbox '{toolbox_name}' is already exposed and its tools are available."
 
         tb = self.toolboxes[toolbox_name]
-        self._agent.add_tools(*tb.tools)
+        self._agent.add_tools(*[_to_agent_tool_dict(t) for t in tb.tools])
 
         new_registry: Dict[str, Dict[str, Any]] = {}
         for tool in tb.tools:
@@ -212,7 +260,61 @@ class ToolboxMiddleware(CallbackHandler):
 
         self._exposed.add(toolbox_name)
         self.logger.info(f"Exposed toolbox '{toolbox_name}' to agent.")
+        logger = getattr(self._agent, "logger", None)
+        if logger:
+            logger.middleware("Toolbox", f"Exposed toolbox '{toolbox_name}' to agent.")
         return f"Success: Exposed all tools in '{toolbox_name}' toolbox. You can now call them."
+
+    @staticmethod
+    def _get_tool_name(tool: Any) -> Optional[str]:
+        """Best-effort extraction of a tool's name across supported tool shapes."""
+        if isinstance(tool, StructuredTool):
+            return tool.name
+        if isinstance(tool, dict):
+            return tool.get("name")
+        if callable(tool):
+            return getattr(tool, "__name__", None)
+        return None
+
+    def _find_tool(self, tool_name: str) -> Optional[Any]:
+        """Search every registered toolbox for a tool matching ``tool_name``."""
+        for tb in self.toolboxes.values():
+            for tool in tb.tools:
+                if self._get_tool_name(tool) == tool_name:
+                    return tool
+        return None
+
+    def _expose_tool_action(self, tool_name: str) -> str:
+        if not self._agent:
+            return "Error: No active agent reference found."
+
+        tool_name = tool_name.strip()
+
+        if tool_name in self._exposed_tools:
+            return f"Tool '{tool_name}' is already exposed and available."
+
+        tool = self._find_tool(tool_name)
+        if tool is None:
+            return f"Error: Tool '{tool_name}' not found in any registered toolbox."
+
+        self._agent.add_tools(_to_agent_tool_dict(tool))
+
+        new_registry: Dict[str, Dict[str, Any]] = {}
+        register_tool(new_registry, tool)
+        schemas = build_tool_list(new_registry)
+
+        exposure_note = (
+            f"\n\n### Exposed Tool: '{tool_name}'\n"
+            f"The following tool is now active and ready to use:\n{schemas}\n"
+        )
+        self._inject_prompt(self._agent, exposure_note)
+
+        self._exposed_tools.add(tool_name)
+        self.logger.info(f"Exposed tool '{tool_name}' to agent.")
+        logger = getattr(self._agent, "logger", None)
+        if logger:
+            logger.middleware("Toolbox", f"Exposed tool '{tool_name}' to agent.")
+        return f"Success: Exposed tool '{tool_name}'. You can now call it."
 
     @staticmethod
     def _inject_prompt(agent: Any, text: str) -> None:
@@ -229,7 +331,7 @@ class ToolboxMiddleware(CallbackHandler):
         if not self._agent:
             return
         if self._initial_tools is not None and hasattr(self._agent, "tools"):
-            self._agent.tools = dict(self._initial_tools)
+            self._agent.tools = list(self._initial_tools)
         if hasattr(self._agent, "system_prompt"):
             self._agent.system_prompt = self._initial_system_prompt
         if hasattr(self._agent, "prompt_template"):
@@ -239,3 +341,4 @@ class ToolboxMiddleware(CallbackHandler):
         self._initial_system_prompt   = None
         self._initial_prompt_template = None
         self._exposed.clear()
+        self._exposed_tools.clear()

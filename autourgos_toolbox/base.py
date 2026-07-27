@@ -1,8 +1,11 @@
 """
-base.py — Self-contained base classes for autourgos-toolbox.
+base.py — Base classes for autourgos-toolbox.
 
-Inlines CallbackHandler, StructuredTool, build_tool_list, and register_tool
-so the package has zero dependency on autourgos-core.
+CallbackHandler is re-exported from autourgos-react-agent, the package that
+owns this interface, to avoid divergent duplicate copies. StructuredTool,
+register_tool, and build_tool_list are toolbox-specific (they operate on a
+dict-based tool registry, unlike react-agent's own build_tool_list which
+operates on a plain list of tool dicts) and remain defined locally here.
 """
 from __future__ import annotations
 
@@ -10,21 +13,9 @@ import inspect
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+from autourgos_react_agent import CallbackHandler
 
-# ── CallbackHandler ────────────────────────────────────────────────────────────
-
-class CallbackHandler:
-    """Base class for Autourgos agent middleware / event hooks."""
-
-    def on_agent_start(self, query: str, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_agent_end(self, response: str, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_agent_error(self, error: Exception, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_iteration_start(self, iteration: int, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_llm_end(self, response: str, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_tool_start(self, tool_name: str, tool_input: Dict, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_tool_end(self, tool_name: str, tool_output: Any, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_tool_error(self, tool_name: str, error: Exception, agent: Any = None, **kwargs: Any) -> None: pass
-    def on_parse_error(self, iteration: int, raw_response: str, **kwargs: Any) -> None: pass
+__all__ = ["CallbackHandler", "StructuredTool", "register_tool", "build_tool_list"]
 
 
 # ── StructuredTool ─────────────────────────────────────────────────────────────

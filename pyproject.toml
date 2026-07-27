@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autourgos-toolbox"
-version = "1.0.1"
+version = "3.0.0"
 description = "Dynamic lazy-loading toolbox middleware for Autourgos agents — keeps context windows clean by loading tools only when needed."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = []
+dependencies = ["autourgos-react-agent>=1.6.0"]
 
 [project.urls]
 Homepage = "https://github.com/devxjitin/autourgos-toolbox"

@@ -24,7 +24,7 @@ Real-world agents often need dozens of tools — GitHub, databases, web search, 
 pip install autourgos-toolbox
 ```
 
-Zero dependencies. Works with any Autourgos agent.
+Depends on `autourgos-react-agent`. Works with any Autourgos agent.
 
 ---
 
@@ -52,6 +52,14 @@ agent = ReactAgent(llm=my_llm, middleware=[middleware])
 
 result = agent.invoke("Find the latest Python release and log it to the database")
 print(result)
+```
+
+When used with a verbose `ReactAgent` (`ReactAgent(..., verbose=True)`), this
+middleware narrates its own actions into the same trace as the agent's
+Thought/Action/Observation output, for example:
+
+```
+[Toolbox] Exposed toolbox 'web' to agent.
 ```
 
 The agent sees this in its prompt at the start:
