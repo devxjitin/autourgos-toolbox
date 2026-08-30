@@ -24,7 +24,7 @@ Real-world agents often need dozens of tools — GitHub, databases, web search, 
 pip install autourgos-toolbox
 ```
 
-Depends on `autourgos-react-agent`. Works with any Autourgos agent.
+Depends on `autourgos-agent`. Works with any Autourgos agent.
 
 ---
 
@@ -32,7 +32,7 @@ Depends on `autourgos-react-agent`. Works with any Autourgos agent.
 
 ```python
 from autourgos_toolbox import Toolbox, ToolboxMiddleware
-from autourgos_react_agent import ReactAgent
+from autourgos_agent import Agent
 
 # Define toolboxes
 web_box = Toolbox(
@@ -48,13 +48,13 @@ db_box = Toolbox(
 
 # Attach middleware
 middleware = ToolboxMiddleware(toolboxes=[web_box, db_box])
-agent = ReactAgent(llm=my_llm, middleware=[middleware])
+agent = Agent(llm=my_llm, middleware=[middleware])
 
 result = agent.invoke("Find the latest Python release and log it to the database")
 print(result)
 ```
 
-When used with a verbose `ReactAgent` (`ReactAgent(..., verbose=True)`), this
+When used with a verbose `Agent` (`Agent(..., verbose=True)`), this
 middleware narrates its own actions into the same trace as the agent's
 Thought/Action/Observation output, for example:
 
@@ -163,7 +163,7 @@ middleware = [
     AutoSummarizeMiddleware(summarize_every=5),
     AgentHistoryMiddleware(),
 ]
-agent = ReactAgent(llm=my_llm, middleware=middleware)
+agent = Agent(llm=my_llm, middleware=middleware)
 ```
 
 ---

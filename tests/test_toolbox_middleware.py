@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import MagicMock
 
-from autourgos_react_agent.testing import make_test_agent
+from autourgos_agent.testing import make_test_agent
 
 from autourgos_toolbox import Toolbox, ToolboxMiddleware
 
@@ -61,7 +61,7 @@ def _build_middleware():
 
 class ToolboxMiddlewareTests(unittest.TestCase):
     """
-    These tests run against a REAL ReactAgent built by make_test_agent(),
+    These tests run against a REAL Agent built by make_test_agent(),
     not a hand-rolled fake. agent.tools is a real list (not a dict), which
     is exactly the shape that used to break ToolboxMiddleware's
     dict(agent.tools) snapshot with a ValueError.
@@ -154,7 +154,7 @@ class ToolboxMiddlewareTests(unittest.TestCase):
         expose_toolbox_meta = by_name["expose_toolbox"]
 
         # meta-tools land on agent.tools as real tool dicts (the shape a
-        # real ReactAgent expects), each with its own "func" callable.
+        # real Agent expects), each with its own "func" callable.
         expose_tool_func = expose_tool_meta["func"] if isinstance(expose_tool_meta, dict) else expose_tool_meta.func
         expose_toolbox_func = expose_toolbox_meta["func"] if isinstance(expose_toolbox_meta, dict) else expose_toolbox_meta.func
 
@@ -220,7 +220,7 @@ class ToolboxMiddlewareTests(unittest.TestCase):
         handler's on_iteration_start (fires after iteration 1's tool call,
         before the restore in on_agent_end).
         """
-        from autourgos_react_agent import CallbackHandler
+        from autourgos_agent import CallbackHandler
 
         middleware = _build_middleware()
 

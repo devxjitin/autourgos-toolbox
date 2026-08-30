@@ -16,10 +16,10 @@ from .base import CallbackHandler, StructuredTool, build_tool_list, register_too
 def _to_agent_tool_dict(tool: Any) -> Any:
     """
     Convert a StructuredTool / plain callable / already-shaped dict into the
-    real ``ReactAgent`` tool dict shape (``{"name", "description",
+    real ``Agent`` tool dict shape (``{"name", "description",
     "parameters", "func"}``) expected by ``agent.tools`` / ``agent.add_tools``.
 
-    react-agent's own tool list is a list of plain dicts (see its "Tool Dict
+    autourgos-agent's own tool list is a list of plain dicts (see its "Tool Dict
     Reference"), not StructuredTool instances or raw callables — passing
     those straight through used to silently corrupt agent.tools and break
     the loop's ``t["name"]`` lookups the first time the LLM actually tried to
@@ -118,7 +118,7 @@ class ToolboxMiddleware(CallbackHandler):
         db_box  = Toolbox("database", "SQL query tools.", [run_query, list_tables])
 
         middleware = ToolboxMiddleware(toolboxes=[web_box, db_box])
-        agent = ReactAgent(llm=my_llm, middleware=[middleware])
+        agent = Agent(llm=my_llm, middleware=[middleware])
         agent.invoke("Find the latest Python release and save it to the DB")
     """
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.1.0] - 2026-08-30
+
+- BREAKING: dependency migrated from `autourgos-react-agent>=1.6.0` (the
+  pre-fork legacy package) to `autourgos-agent>=2.0.2`. `autourgos-react-agent`
+  still carries its original loop bugs (denied tool calls never firing
+  `on_tool_end`, an async `approval_callback` silently always-approving under
+  `invoke()`, no duck-typed tool support, an unbounded tool-call thread pool)
+  that `autourgos-agent` 2.0.2 fixed — staying on the old dependency meant
+  this middleware ran against an agent loop with unfixed bugs regardless of
+  fixes made downstream. All `ReactAgent` references in code/docs/tests are
+  now `Agent`, matching the current package name.
+
 ## [3.0.0] - 2026-07-27
 
 - BREAKING: requires autourgos-react-agent>=1.6.0.

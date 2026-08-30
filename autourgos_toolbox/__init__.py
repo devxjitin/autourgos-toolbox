@@ -12,7 +12,7 @@ Quick start::
     db_box  = Toolbox("database", "SQL tools.", [run_query, list_tables])
 
     middleware = ToolboxMiddleware(toolboxes=[web_box, db_box])
-    agent = ReactAgent(llm=my_llm, middleware=[middleware])
+    agent = Agent(llm=my_llm, middleware=[middleware])
 """
 
 from .base import CallbackHandler, StructuredTool, build_tool_list, register_tool

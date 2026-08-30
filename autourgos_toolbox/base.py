@@ -1,10 +1,10 @@
 """
 base.py — Base classes for autourgos-toolbox.
 
-CallbackHandler is re-exported from autourgos-react-agent, the package that
+CallbackHandler is re-exported from autourgos-agent, the package that
 owns this interface, to avoid divergent duplicate copies. StructuredTool,
 register_tool, and build_tool_list are toolbox-specific (they operate on a
-dict-based tool registry, unlike react-agent's own build_tool_list which
+dict-based tool registry, unlike autourgos-agent's own build_tool_list which
 operates on a plain list of tool dicts) and remain defined locally here.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import inspect
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from autourgos_react_agent import CallbackHandler
+from autourgos_agent import CallbackHandler
 
 __all__ = ["CallbackHandler", "StructuredTool", "register_tool", "build_tool_list"]
 
