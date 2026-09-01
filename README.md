@@ -158,6 +158,11 @@ middleware.add_toolbox("github", "GitHub tools.", [search_issues, create_pr])
 middleware.add_toolbox("slack", "Slack tools.", [send_message, read_channel])
 ```
 
+`add_toolbox()` raises `ValueError` if any tool name in the new toolbox already exists in a
+*different*, previously registered toolbox — tool names must be unique across every toolbox on
+one middleware instance. Re-registering the same toolbox name (to update its tools) is fine and
+doesn't trip this check.
+
 ---
 
 ## Using StructuredTool
