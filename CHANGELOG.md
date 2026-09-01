@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.2.0] - 2026-09-01
+
+- Added: `add_toolbox()` now raises `ValueError` if a tool name collides
+  with one already registered in a *different* toolbox. Previously two
+  toolboxes could both silently register a tool with the same name (e.g.
+  `"search"`); once both were exposed, `agent.tools` ended up with two
+  entries sharing a name and lookup became order-dependent/undefined.
+  Re-registering/updating the same toolbox name is unaffected.
+
 ## [3.1.0] - 2026-08-30
 
 - BREAKING: dependency migrated from `autourgos-react-agent>=1.6.0` (the
