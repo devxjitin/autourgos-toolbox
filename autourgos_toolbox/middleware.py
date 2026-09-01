@@ -140,7 +140,7 @@ class ToolboxMiddleware(CallbackHandler):
             if isinstance(toolboxes, list):
                 for tb in toolboxes:
                     if isinstance(tb, Toolbox):
-                        self.toolboxes[tb.name] = tb
+                        self.add_toolbox(tb.name, tb.description, tb.tools)
             elif isinstance(toolboxes, dict):
                 for name, info in toolboxes.items():
                     self.add_toolbox(name, info.get("description", ""), info.get("tools", []))
@@ -148,8 +148,32 @@ class ToolboxMiddleware(CallbackHandler):
     # ── public API ─────────────────────────────────────────────────────────────
 
     def add_toolbox(self, name: str, description: str, tools: List[Any]) -> None:
-        """Register a new toolbox. Can be called before or after agent start."""
-        self.toolboxes[name.strip()] = Toolbox(name, description, tools)
+        """Register a new toolbox. Can be called before or after agent start.
+
+        Raises
+        ------
+        ValueError
+            If any tool in ``tools`` shares a name with a tool already
+            registered in a *different* toolbox. Without this check, two
+            toolboxes both exposing e.g. a ``"search"`` tool would silently
+            both land on ``agent.tools`` once both were exposed, leaving
+            lookup order-dependent/undefined for whichever one the agent's
+            LLM ends up calling.
+        """
+        name = name.strip()
+        incoming_names = {n for n in (self._get_tool_name(t) for t in tools) if n}
+        for other_name, other_tb in self.toolboxes.items():
+            if other_name == name:
+                continue  # re-registering/updating this same toolbox is fine
+            existing_names = {n for n in (self._get_tool_name(t) for t in other_tb.tools) if n}
+            collisions = incoming_names & existing_names
+            if collisions:
+                raise ValueError(
+                    f"Toolbox '{name}' has tool name(s) {sorted(collisions)} that "
+                    f"already exist in toolbox '{other_name}'. Tool names must be "
+                    f"unique across all registered toolboxes."
+                )
+        self.toolboxes[name] = Toolbox(name, description, tools)
 
     # ── lifecycle hooks ────────────────────────────────────────────────────────
 

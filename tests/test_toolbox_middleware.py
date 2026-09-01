@@ -264,5 +264,40 @@ class ToolboxMiddlewareTests(unittest.TestCase):
         self.assertIn("Success", result2)
 
 
+    def test_toolboxes_with_colliding_tool_names_are_rejected_at_registration(self):
+        """Two toolboxes both exposing a tool named 'search_issues' used to
+        both silently succeed; once both were exposed, agent.tools ended up
+        with two entries sharing a name and lookup became order-dependent.
+        This must now fail fast at registration instead."""
+        box_a = Toolbox(name="a", description="d", tools=[search_issues])
+
+        def search_issues_duplicate(query: str) -> str:
+            """Also called search_issues.
+
+            Args:
+                query: search text.
+            """
+            return f"dup results for {query}"
+        search_issues_duplicate.__name__ = "search_issues"
+
+        box_b = Toolbox(name="b", description="d", tools=[search_issues_duplicate])
+
+        with self.assertRaises(ValueError):
+            ToolboxMiddleware(toolboxes=[box_a, box_b])
+
+    def test_add_toolbox_rejects_collision_with_existing_toolbox(self):
+        middleware = _build_middleware()  # has 'github' (search_issues, create_pr) and 'database'
+
+        with self.assertRaises(ValueError):
+            middleware.add_toolbox("github2", "d", [search_issues])
+
+    def test_add_toolbox_reregistering_same_name_does_not_raise(self):
+        middleware = _build_middleware()
+        # updating the 'github' toolbox's own tools must not trip the
+        # cross-toolbox collision check against itself
+        middleware.add_toolbox("github", "updated", [search_issues, create_pr])
+        self.assertIn("create_pr", {t.__name__ for t in middleware.toolboxes["github"].tools})
+
+
 if __name__ == "__main__":
     unittest.main()
