@@ -8,7 +8,8 @@ to lazy-load the actual tools it needs.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Union
+import weakref
+from typing import Any, Dict, List, Optional, Union
 
 from .base import CallbackHandler, StructuredTool, build_tool_list, register_tool
 
@@ -128,13 +129,23 @@ class ToolboxMiddleware(CallbackHandler):
     ) -> None:
         self.logger    = logging.getLogger(__name__)
         self.toolboxes: Dict[str, Toolbox] = {}
-        self._exposed:  Set[str]           = set()
-        self._exposed_tools: Set[str]      = set()
 
-        self._agent:                   Optional[Any] = None
-        self._initial_tools:           Optional[List[Any]] = None
-        self._initial_system_prompt:   Optional[str] = None
-        self._initial_prompt_template: Optional[str] = None
+        # Per-agent run state, keyed by the actual agent object rather than
+        # flat instance attributes. A single ToolboxMiddleware instance can
+        # back multiple concurrent agent.invoke() calls (its own README
+        # advertises "works with any Autourgos agent" with no single-run
+        # caveat); flat self._agent/self._exposed/... attributes would let
+        # one run's on_agent_start overwrite another's in-flight state and
+        # restore the wrong agent's tools on on_agent_end. WeakKeyDictionary
+        # also means a run's entry is freed automatically if its agent is
+        # garbage-collected without on_agent_end ever firing.
+        self._runs: "weakref.WeakKeyDictionary[Any, Dict[str, Any]]" = weakref.WeakKeyDictionary()
+        # Fallback target for the private _expose_toolbox_action/_expose_tool_action
+        # methods when called directly without an explicit agent (e.g. tests
+        # exercising a single run) -- the meta-tool closures built in
+        # on_agent_start always pass their own agent explicitly and never
+        # rely on this.
+        self._last_agent: Optional[Any] = None
 
         if toolboxes:
             if isinstance(toolboxes, list):
@@ -183,23 +194,27 @@ class ToolboxMiddleware(CallbackHandler):
         if agent is None:
             return
 
-        self._agent  = agent
-        self._exposed = set()
-        self._exposed_tools = set()
+        self._last_agent = agent
+        run_state: Dict[str, Any] = {
+            # snapshot original state for restore
+            "initial_tools":           list(agent.tools) if hasattr(agent, "tools") else [],
+            "initial_system_prompt":   getattr(agent, "system_prompt", None),
+            "initial_prompt_template": getattr(agent, "prompt_template", None),
+            "exposed":                 set(),
+            "exposed_tools":           set(),
+        }
+        self._runs[agent] = run_state
 
-        # snapshot original state for restore
-        self._initial_tools           = list(agent.tools) if hasattr(agent, "tools") else []
-        self._initial_system_prompt   = getattr(agent, "system_prompt", None)
-        self._initial_prompt_template = getattr(agent, "prompt_template", None)
-
-        # inject meta-tools
+        # inject meta-tools, bound to THIS run's agent explicitly so a
+        # concurrent run's expose_toolbox/expose_tool calls can never act
+        # on the wrong agent even if runs interleave.
         def expose_toolbox(toolbox_name: str) -> str:
             """Expose all tools in the specified toolbox, making them available for you to use.
 
             Args:
                 toolbox_name: The exact name of the toolbox to expose (e.g. 'github').
             """
-            return self._expose_toolbox_action(toolbox_name)
+            return self._expose_toolbox_action(toolbox_name, agent=agent)
 
         def expose_tool(tool_name: str) -> str:
             """Expose a single tool by name, searching across all registered toolboxes.
@@ -208,7 +223,7 @@ class ToolboxMiddleware(CallbackHandler):
                 tool_name: The exact name of the tool to expose (e.g. 'create_pr'). This
                     does not require knowing which toolbox the tool lives in.
             """
-            return self._expose_tool_action(tool_name)
+            return self._expose_tool_action(tool_name, agent=agent)
 
         expose_toolbox_tool = StructuredTool.from_function(
             func=expose_toolbox,
@@ -249,15 +264,17 @@ class ToolboxMiddleware(CallbackHandler):
             self._inject_prompt(agent, instruction)
 
     def on_agent_end(self, response: str, agent: Any = None, **kwargs: Any) -> None:
-        self._restore_agent()
+        self._restore_agent(agent or self._last_agent)
 
     def on_agent_error(self, error: Exception, agent: Any = None, **kwargs: Any) -> None:
-        self._restore_agent()
+        self._restore_agent(agent or self._last_agent)
 
     # ── internal ───────────────────────────────────────────────────────────────
 
-    def _expose_toolbox_action(self, toolbox_name: str) -> str:
-        if not self._agent:
+    def _expose_toolbox_action(self, toolbox_name: str, agent: Any = None) -> str:
+        agent = agent or self._last_agent
+        run_state = self._runs.get(agent) if agent is not None else None
+        if agent is None or run_state is None:
             return "Error: No active agent reference found."
 
         toolbox_name = toolbox_name.strip()
@@ -265,11 +282,11 @@ class ToolboxMiddleware(CallbackHandler):
             available = ", ".join(self.toolboxes.keys())
             return f"Error: Toolbox '{toolbox_name}' not found. Available: {available}"
 
-        if toolbox_name in self._exposed:
+        if toolbox_name in run_state["exposed"]:
             return f"Toolbox '{toolbox_name}' is already exposed and its tools are available."
 
         tb = self.toolboxes[toolbox_name]
-        self._agent.add_tools(*[_to_agent_tool_dict(t) for t in tb.tools])
+        agent.add_tools(*[_to_agent_tool_dict(t) for t in tb.tools])
 
         new_registry: Dict[str, Dict[str, Any]] = {}
         for tool in tb.tools:
@@ -280,11 +297,11 @@ class ToolboxMiddleware(CallbackHandler):
             f"\n\n### Exposed Toolbox: '{toolbox_name}'\n"
             f"The following tools are now active and ready to use:\n{schemas}\n"
         )
-        self._inject_prompt(self._agent, exposure_note)
+        self._inject_prompt(agent, exposure_note)
 
-        self._exposed.add(toolbox_name)
+        run_state["exposed"].add(toolbox_name)
         self.logger.info(f"Exposed toolbox '{toolbox_name}' to agent.")
-        logger = getattr(self._agent, "logger", None)
+        logger = getattr(agent, "logger", None)
         if logger:
             logger.middleware("Toolbox", f"Exposed toolbox '{toolbox_name}' to agent.")
         return f"Success: Exposed all tools in '{toolbox_name}' toolbox. You can now call them."
@@ -308,20 +325,22 @@ class ToolboxMiddleware(CallbackHandler):
                     return tool
         return None
 
-    def _expose_tool_action(self, tool_name: str) -> str:
-        if not self._agent:
+    def _expose_tool_action(self, tool_name: str, agent: Any = None) -> str:
+        agent = agent or self._last_agent
+        run_state = self._runs.get(agent) if agent is not None else None
+        if agent is None or run_state is None:
             return "Error: No active agent reference found."
 
         tool_name = tool_name.strip()
 
-        if tool_name in self._exposed_tools:
+        if tool_name in run_state["exposed_tools"]:
             return f"Tool '{tool_name}' is already exposed and available."
 
         tool = self._find_tool(tool_name)
         if tool is None:
             return f"Error: Tool '{tool_name}' not found in any registered toolbox."
 
-        self._agent.add_tools(_to_agent_tool_dict(tool))
+        agent.add_tools(_to_agent_tool_dict(tool))
 
         new_registry: Dict[str, Dict[str, Any]] = {}
         register_tool(new_registry, tool)
@@ -331,11 +350,11 @@ class ToolboxMiddleware(CallbackHandler):
             f"\n\n### Exposed Tool: '{tool_name}'\n"
             f"The following tool is now active and ready to use:\n{schemas}\n"
         )
-        self._inject_prompt(self._agent, exposure_note)
+        self._inject_prompt(agent, exposure_note)
 
-        self._exposed_tools.add(tool_name)
+        run_state["exposed_tools"].add(tool_name)
         self.logger.info(f"Exposed tool '{tool_name}' to agent.")
-        logger = getattr(self._agent, "logger", None)
+        logger = getattr(agent, "logger", None)
         if logger:
             logger.middleware("Toolbox", f"Exposed tool '{tool_name}' to agent.")
         return f"Success: Exposed tool '{tool_name}'. You can now call it."
@@ -351,18 +370,17 @@ class ToolboxMiddleware(CallbackHandler):
                 f"{text}\n\n{agent.prompt_template}" if agent.prompt_template else text
             )
 
-    def _restore_agent(self) -> None:
-        if not self._agent:
+    def _restore_agent(self, agent: Any = None) -> None:
+        if agent is None:
             return
-        if self._initial_tools is not None and hasattr(self._agent, "tools"):
-            self._agent.tools = list(self._initial_tools)
-        if hasattr(self._agent, "system_prompt"):
-            self._agent.system_prompt = self._initial_system_prompt
-        if hasattr(self._agent, "prompt_template"):
-            self._agent.prompt_template = self._initial_prompt_template
-        self._agent                   = None
-        self._initial_tools           = None
-        self._initial_system_prompt   = None
-        self._initial_prompt_template = None
-        self._exposed.clear()
-        self._exposed_tools.clear()
+        run_state = self._runs.pop(agent, None)
+        if run_state is None:
+            return
+        if run_state["initial_tools"] is not None and hasattr(agent, "tools"):
+            agent.tools = list(run_state["initial_tools"])
+        if hasattr(agent, "system_prompt"):
+            agent.system_prompt = run_state["initial_system_prompt"]
+        if hasattr(agent, "prompt_template"):
+            agent.prompt_template = run_state["initial_prompt_template"]
+        if self._last_agent is agent:
+            self._last_agent = None

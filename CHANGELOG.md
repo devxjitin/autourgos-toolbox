@@ -1,5 +1,51 @@
 # Changelog
 
+## [3.2.4] - 2026-09-01
+
+- Dependency: raised the `autourgos-agent` floor from `>=2.0.2` to
+  `>=3.1.0`. `autourgos-agent` 3.1.0 added sync-hook thread offloading in
+  `CallbackManager` under `ainvoke()` (a sync `on_iteration_start`/etc.
+  handler now runs off the event-loop thread instead of inline) -- below
+  that version, a blocking call inside this middleware's hooks would stall
+  every other concurrent `ainvoke()` run sharing that thread. The old
+  floor allowed resolving against a pre-3.1.0 install that lacks this fix.
+  No code changes here.
+
+## [3.2.3] - 2026-09-01
+
+- Metadata: added `maintainers` (Sonia, Vishwanil Suman) to `pyproject.toml`,
+  and linked the README's existing Sonia contributor badge to her GitHub
+  profile (https://github.com/dahiyasonia). No code changes.
+
+## [3.2.2] - 2026-09-01
+
+- Fixed: `StructuredTool._infer_schema` silently defaulted a parameter's
+  JSON schema type to `"string"` whenever its type annotation wasn't one
+  of the mapped primitives (`str`/`int`/`float`/`bool`/`list`/`dict`) --
+  e.g. `Optional[str]`, `List[int]`, or a custom class -- with no signal to
+  the tool author that the inferred schema might be wrong. Now logs a
+  warning naming the parameter, the function, and the unmapped annotation
+  when this fallback is used. A genuinely absent annotation (no type hint
+  at all) is unaffected -- that's the normal case and still defaults to
+  `"string"` without warning.
+
+## [3.2.1] - 2026-09-01
+
+- Fixed: `ToolboxMiddleware` held run state (`_agent`, `_exposed`,
+  `_exposed_tools`, `_initial_tools`, `_initial_system_prompt`,
+  `_initial_prompt_template`) as flat instance attributes shared across
+  every `agent.invoke()` call. One middleware instance backing two
+  concurrent runs meant a later run's `on_agent_start` silently overwrote
+  an earlier run's in-flight snapshot, and `on_agent_end`/`on_agent_error`
+  ignored the `agent` argument entirely -- restoring whichever agent
+  `self._agent` currently pointed to, not necessarily the one that
+  actually ended. State is now keyed per-agent in a
+  `weakref.WeakKeyDictionary`, and the `expose_toolbox`/`expose_tool`
+  meta-tool closures built in `on_agent_start` bind to that run's specific
+  agent object. Public API (`Toolbox`, `add_toolbox`, constructor, hook
+  signatures) is unchanged; single-agent-at-a-time usage behaves
+  identically.
+
 ## [3.2.0] - 2026-09-01
 
 - Added: `add_toolbox()` now raises `ValueError` if a tool name collides

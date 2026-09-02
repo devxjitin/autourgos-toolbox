@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from autourgos_agent import CallbackHandler
 
 __all__ = ["CallbackHandler", "StructuredTool", "register_tool", "build_tool_list"]
+
+logger = logging.getLogger(__name__)
 
 
 # ── StructuredTool ─────────────────────────────────────────────────────────────
@@ -73,7 +76,23 @@ class StructuredTool:
             type_name = "string"
             if hint is not None:
                 raw = getattr(hint, "__name__", str(hint))
-                type_name = _PY_TO_JSON.get(raw, "string")
+                if raw in _PY_TO_JSON:
+                    type_name = _PY_TO_JSON[raw]
+                else:
+                    # An annotation IS present but isn't one of the primitive
+                    # types this inferrer maps (e.g. Optional[str], List[int],
+                    # a custom class) -- falls back to "string" silently
+                    # otherwise, which can produce a wrong schema with no
+                    # signal to the tool author. A genuinely absent
+                    # annotation (hint is None, handled above) is the normal
+                    # case and does not warn.
+                    logger.warning(
+                        "StructuredTool: parameter %r of %r has unmapped type "
+                        "annotation %r -- defaulting its JSON schema type to "
+                        "'string'. Supported annotations: %s.",
+                        param_name, getattr(func, "__name__", func), raw,
+                        sorted(_PY_TO_JSON),
+                    )
 
             # parse inline description from docstring "param: description" lines
             doc   = inspect.getdoc(func) or ""

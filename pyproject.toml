@@ -4,13 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autourgos-toolbox"
-version = "3.2.0"
+version = "3.2.4"
 description = "Dynamic lazy-loading toolbox middleware for Autourgos agents — keeps context windows clean by loading tools only when needed."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
     {name = "Jitin Kumar Sengar", email = "devxjitin@gmail.com"}
+]
+maintainers = [
+    {name = "Sonia"},
+    {name = "Vishwanil Suman"},
 ]
 keywords = ["autourgos", "agent", "middleware", "toolbox", "llm", "tools", "lazy-loading"]
 classifiers = [
@@ -23,7 +27,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["autourgos-agent>=2.0.2"]
+dependencies = ["autourgos-agent>=3.1.0"]
 
 [project.urls]
 Homepage = "https://github.com/devxjitin/autourgos-toolbox"

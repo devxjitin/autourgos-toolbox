@@ -1,10 +1,11 @@
 import json
+import logging
 import unittest
 from unittest.mock import MagicMock
 
 from autourgos_agent.testing import make_test_agent
 
-from autourgos_toolbox import Toolbox, ToolboxMiddleware
+from autourgos_toolbox import StructuredTool, Toolbox, ToolboxMiddleware
 
 
 def _tool_names(agent):
@@ -290,6 +291,79 @@ class ToolboxMiddlewareTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             middleware.add_toolbox("github2", "d", [search_issues])
+
+    def test_concurrent_runs_do_not_corrupt_each_others_state(self):
+        """Regression: flat self._agent/self._exposed instance attributes used
+        to be shared across every run of a middleware instance. If run A's
+        on_agent_start fires, then run B's on_agent_start fires before A ends,
+        B would overwrite A's snapshot/exposed-set, and A's later
+        expose_toolbox/on_agent_end would silently act on B's agent instead
+        of its own. Runs must be isolated per agent object."""
+        middleware = _build_middleware()
+        agent_a = make_test_agent(middleware=[middleware])
+        agent_b = make_test_agent(middleware=[middleware])
+        # Pre-start snapshot -- what on_agent_end restores back to.
+        pre_start_a = set(_tool_names(agent_a))
+        pre_start_b = set(_tool_names(agent_b))
+
+        # Interleave: start A, start B (before A ends), expose github only on A.
+        middleware.on_agent_start("query a", agent=agent_a)
+        middleware.on_agent_start("query b", agent=agent_b)
+
+        # Post-start snapshot (meta-tools already injected on both agents by
+        # design) so the mid-run assertions below isolate exactly the
+        # cross-run leakage this test targets.
+        post_start_b = set(_tool_names(agent_b))
+
+        result = middleware._expose_toolbox_action("github", agent=agent_a)
+        self.assertIn("Success", result)
+        self.assertIn("search_issues", _tool_names(agent_a))
+        # B must be unaffected by A's exposure.
+        self.assertEqual(set(_tool_names(agent_b)), post_start_b)
+
+        # End B first -- must restore B to its own pre-start tools, not A's.
+        middleware.on_agent_end("done b", agent=agent_b)
+        self.assertEqual(set(_tool_names(agent_b)), pre_start_b)
+        # A's exposed toolbox must still be intact -- B's end must not have
+        # touched A's state.
+        self.assertIn("search_issues", _tool_names(agent_a))
+
+        # End A -- must restore A to its own pre-start tools.
+        middleware.on_agent_end("done a", agent=agent_a)
+        self.assertEqual(set(_tool_names(agent_a)), pre_start_a)
+
+    def test_structured_tool_warns_on_unmapped_type_annotation(self):
+        """Regression: an annotation present but not one of the primitive
+        types _infer_schema maps (e.g. a custom class) silently fell back to
+        "string" with no signal to the tool author. A genuinely absent
+        annotation must NOT warn -- that's the normal, expected case."""
+
+        class Widget:
+            pass
+
+        def uses_custom_type(thing: Widget) -> str:
+            """Use a widget."""
+            return "ok"
+
+        def uses_no_annotation(thing) -> str:
+            """Use anything."""
+            return "ok"
+
+        with self.assertLogs("autourgos_toolbox.base", level="WARNING") as cm:
+            tool = StructuredTool.from_function(uses_custom_type)
+        self.assertIn("unmapped type", cm.output[0])
+        self.assertEqual(tool.args_schema["properties"]["thing"]["type"], "string")
+
+        logger = logging.getLogger("autourgos_toolbox.base")
+        handler = logging.Handler()
+        records = []
+        handler.emit = records.append
+        logger.addHandler(handler)
+        try:
+            StructuredTool.from_function(uses_no_annotation)
+        finally:
+            logger.removeHandler(handler)
+        self.assertEqual(records, [])
 
     def test_add_toolbox_reregistering_same_name_does_not_raise(self):
         middleware = _build_middleware()

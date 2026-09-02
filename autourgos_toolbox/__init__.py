@@ -22,7 +22,7 @@ try:
     from importlib.metadata import version as _meta_version
     __version__ = _meta_version("autourgos-toolbox")
 except Exception:
-    __version__ = "3.1.1"
+    __version__ = "3.2.4"
 
 __all__ = [
     "Toolbox",
