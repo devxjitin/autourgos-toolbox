@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autourgos-toolbox"
-version = "3.2.4"
+version = "3.2.5"
 description = "Dynamic lazy-loading toolbox middleware for Autourgos agents — keeps context windows clean by loading tools only when needed."
 readme = "README.md"
 requires-python = ">=3.9"

@@ -1,5 +1,10 @@
 # Changelog
 
+## [3.2.5] - 2026-09-03
+
+- Added `features.md` documenting the module's feature set and a competitor comparison. No code changes.
+
+
 ## [3.2.4] - 2026-09-01
 
 - Dependency: raised the `autourgos-agent` floor from `>=2.0.2` to
