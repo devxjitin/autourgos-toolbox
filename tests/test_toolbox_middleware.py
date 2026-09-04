@@ -416,6 +416,69 @@ class ToolboxMiddlewareTests(unittest.TestCase):
         middleware.add_toolbox("github", "updated", [search_issues, create_pr])
         self.assertIn("create_pr", {t.__name__ for t in middleware.toolboxes["github"].tools})
 
+    def test_restore_is_exact_even_with_foreign_text_injected_around_it(self):
+        """
+        Regression: restore used to snapshot the WHOLE system_prompt before
+        injecting and restore that whole snapshot after -- if another
+        middleware (autourgos-hcix, autourgos-skills) prepended text of its
+        own between this middleware's on_agent_start and on_agent_end, this
+        middleware's snapshot-based restore would silently discard that
+        other middleware's still-active injection (or, depending on
+        registration order, permanently bake this middleware's own catalog
+        into what the other middleware treats as "the original"). Restore
+        must now remove exactly the block THIS middleware added, leaving
+        anything else untouched regardless of when it was added.
+        """
+        middleware = _build_middleware()
+        agent = make_test_agent(middleware=[middleware])
+        base_prompt = agent.system_prompt
+
+        middleware.on_agent_start("query", agent=agent)
+        self.assertIn("Dynamic Toolboxes", agent.system_prompt)
+
+        # simulate a second, unrelated middleware injecting its own text
+        # AFTER toolbox already injected, and never removing it before
+        # toolbox's own on_agent_end fires
+        agent.system_prompt = f"FOREIGN BLOCK\n\n{agent.system_prompt}"
+
+        middleware.on_agent_end("done", agent=agent)
+
+        self.assertEqual(agent.system_prompt, f"FOREIGN BLOCK\n\n{base_prompt}")
+
+    def test_tools_restore_does_not_clobber_a_tool_added_by_another_middleware(self):
+        """
+        Regression: a whole-list agent.tools snapshot/restore (what this
+        middleware -- and autourgos-skills -- used to do) is order
+        dependent the moment TWO middleware both add tools to the same
+        agent. If this middleware's on_agent_start snapshots agent.tools
+        AFTER another middleware already added its own tool, this
+        middleware's restore would put that other middleware's tool back
+        even after the other middleware's own on_agent_end already removed
+        it. Restore must remove only the exact tool objects THIS
+        middleware added (expose_toolbox/expose_tool, plus anything
+        exposed), regardless of what any other middleware does with
+        agent.tools before, after, or in between.
+        """
+        middleware = _build_middleware()
+        agent = make_test_agent(middleware=[middleware])
+
+        middleware.on_agent_start("query", agent=agent)
+        middleware._expose_toolbox_action("github")
+
+        # simulate a second, unrelated middleware adding its own tool
+        # AFTER toolbox already added its meta-tools + exposed tools,
+        # still active when toolbox's own on_agent_end fires
+        foreign_tool = {"name": "foreign_tool", "description": "", "parameters": {}, "func": lambda: "x"}
+        agent.add_tools(foreign_tool)
+
+        middleware.on_agent_end("done", agent=agent)
+
+        tool_names = set(_tool_names(agent))
+        self.assertNotIn("expose_toolbox", tool_names)
+        self.assertNotIn("expose_tool", tool_names)
+        self.assertNotIn("search_issues", tool_names)
+        self.assertIn("foreign_tool", tool_names)
+
     def test_two_concurrent_agents_share_one_middleware_without_state_clash(self):
         """
         Sprint 5 regression: ToolboxMiddleware is commonly a single shared

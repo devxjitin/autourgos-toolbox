@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.4.0] - 2026-09-05
+
+- **Fixed:** `expose_toolbox`/`expose_tool` tool-list and system-prompt restore was a whole-snapshot/whole-restore, order-dependent the moment another middleware (hcix, skills) also adds tools or injects prompt text: whichever middleware's `on_agent_end` fired last would clobber an earlier middleware's restore, and a middleware registering second would snapshot the first's already-added tools/text as "original," so restore never actually got back to the true original state. Now tracks only the exact tool objects and prompt blocks THIS run added (`added_tools`/`injected_blocks`) and removes only those, by identity -- correct regardless of registration order or what other middleware does in between. Uses autourgos-agent 3.2.0's new `inject_prompt_block()`/`remove_prompt_block()` shared primitive. Bumped `autourgos-agent>=3.2.0`.
+
 ## [3.3.2] - 2026-09-05
 
 - Internal: `ToolboxMiddleware._get_tool_name()` no longer duplicates its own duck-typed tool-name lookup -- delegates to `autourgos_agent.base._tool_name()`, which gained a bare-callable `__name__` fallback (autourgos-agent 3.1.6) to cover the case this package's version already handled. Bumped `autourgos-agent>=3.1.6`. No behavior change.

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Union
 
+from autourgos_agent import inject_prompt_block, remove_prompt_block
 from autourgos_agent.base import _tool_name
 from autourgos_core import PerAgentRegistry
 
@@ -198,12 +199,24 @@ class ToolboxMiddleware(CallbackHandler):
 
         self._last_agent = agent
         run_state: Dict[str, Any] = {
-            # snapshot original state for restore
-            "initial_tools":           list(agent.tools) if hasattr(agent, "tools") else [],
-            "initial_system_prompt":   getattr(agent, "system_prompt", None),
-            "initial_prompt_template": getattr(agent, "prompt_template", None),
-            "exposed":                 set(),
-            "exposed_tools":           set(),
+            # Neither agent.tools nor system_prompt/prompt_template is
+            # snapshotted-and-restored-whole: with multiple middleware
+            # (toolbox, hcix, skills) each independently adding to
+            # agent.tools / injecting into the same shared prompt string,
+            # whichever registered second would snapshot the first's
+            # already-added tools/text as if they were "the original," and
+            # restoring would never actually get back to the true original
+            # -- see inject_prompt_block's module docstring in
+            # autourgos-agent for the full explanation (same root cause,
+            # same fix shape, applied here to agent.tools instead of a
+            # prompt string). Instead this run tracks only the exact tool
+            # objects / prompt blocks THIS instance added (below), each
+            # independently removable regardless of order or what other
+            # middleware does in between.
+            "added_tools":     [],
+            "injected_blocks": [],
+            "exposed":         set(),
+            "exposed_tools":   set(),
         }
         self._runs.set(agent, run_state)
 
@@ -241,10 +254,9 @@ class ToolboxMiddleware(CallbackHandler):
                 "of its toolbox."
             ),
         )
-        agent.add_tools(
-            _to_agent_tool_dict(expose_toolbox_tool),
-            _to_agent_tool_dict(expose_tool_tool),
-        )
+        added = [_to_agent_tool_dict(expose_toolbox_tool), _to_agent_tool_dict(expose_tool_tool)]
+        agent.add_tools(*added)
+        run_state["added_tools"].extend(added)
 
         # inject toolbox catalog into system prompt
         if self.toolboxes:
@@ -263,7 +275,7 @@ class ToolboxMiddleware(CallbackHandler):
                 "Do NOT attempt to use any toolbox tools until you have called `expose_toolbox` "
                 "and received confirmation."
             )
-            self._inject_prompt(agent, instruction)
+            run_state["injected_blocks"].append(inject_prompt_block(agent, instruction))
 
     def on_agent_end(self, response: str, agent: Any = None, **kwargs: Any) -> None:
         self._restore_agent(agent or self._last_agent)
@@ -288,7 +300,9 @@ class ToolboxMiddleware(CallbackHandler):
             return f"Toolbox '{toolbox_name}' is already exposed and its tools are available."
 
         tb = self.toolboxes[toolbox_name]
-        agent.add_tools(*[_to_agent_tool_dict(t) for t in tb.tools])
+        added = [_to_agent_tool_dict(t) for t in tb.tools]
+        agent.add_tools(*added)
+        run_state["added_tools"].extend(added)
 
         new_registry: Dict[str, Dict[str, Any]] = {}
         for tool in tb.tools:
@@ -299,7 +313,7 @@ class ToolboxMiddleware(CallbackHandler):
             f"\n\n### Exposed Toolbox: '{toolbox_name}'\n"
             f"The following tools are now active and ready to use:\n{schemas}\n"
         )
-        self._inject_prompt(agent, exposure_note)
+        run_state["injected_blocks"].append(inject_prompt_block(agent, exposure_note))
 
         run_state["exposed"].add(toolbox_name)
         self.logger.info(f"Exposed toolbox '{toolbox_name}' to agent.")
@@ -339,7 +353,9 @@ class ToolboxMiddleware(CallbackHandler):
         if tool is None:
             return f"Error: Tool '{tool_name}' not found in any registered toolbox."
 
-        agent.add_tools(_to_agent_tool_dict(tool))
+        converted = _to_agent_tool_dict(tool)
+        agent.add_tools(converted)
+        run_state["added_tools"].append(converted)
 
         new_registry: Dict[str, Dict[str, Any]] = {}
         register_tool(new_registry, tool)
@@ -349,7 +365,7 @@ class ToolboxMiddleware(CallbackHandler):
             f"\n\n### Exposed Tool: '{tool_name}'\n"
             f"The following tool is now active and ready to use:\n{schemas}\n"
         )
-        self._inject_prompt(agent, exposure_note)
+        run_state["injected_blocks"].append(inject_prompt_block(agent, exposure_note))
 
         run_state["exposed_tools"].add(tool_name)
         self.logger.info(f"Exposed tool '{tool_name}' to agent.")
@@ -358,28 +374,30 @@ class ToolboxMiddleware(CallbackHandler):
             logger.middleware("Toolbox", f"Exposed tool '{tool_name}' to agent.")
         return f"Success: Exposed tool '{tool_name}'. You can now call it."
 
-    @staticmethod
-    def _inject_prompt(agent: Any, text: str) -> None:
-        if hasattr(agent, "system_prompt"):
-            agent.system_prompt = (
-                f"{text}\n\n{agent.system_prompt}" if agent.system_prompt else text
-            )
-        elif hasattr(agent, "prompt_template"):
-            agent.prompt_template = (
-                f"{text}\n\n{agent.prompt_template}" if agent.prompt_template else text
-            )
-
     def _restore_agent(self, agent: Any = None) -> None:
         if agent is None:
             return
         run_state = self._runs.pop(agent, None)
         if run_state is None:
             return
-        if run_state["initial_tools"] is not None and hasattr(agent, "tools"):
-            agent.tools = list(run_state["initial_tools"])
-        if hasattr(agent, "system_prompt"):
-            agent.system_prompt = run_state["initial_system_prompt"]
-        if hasattr(agent, "prompt_template"):
-            agent.prompt_template = run_state["initial_prompt_template"]
+        # Remove exactly the tool objects THIS run added, by identity --
+        # not a whole-list snapshot/restore, which is order-dependent the
+        # moment another middleware (hcix, skills) also adds tools: see
+        # run_state's "added_tools" comment in on_agent_start. Identity
+        # (not name) match, since add_tools() itself may have replaced an
+        # earlier same-named tool when we added ours -- if something else
+        # has since taken over that exact object's slot in agent.tools
+        # (e.g. a later add_tools() call replacing it by name), there's
+        # nothing of ours left to remove there, which is correct: that
+        # slot is no longer ours to manage.
+        if hasattr(agent, "tools") and run_state["added_tools"]:
+            added_ids = {id(t) for t in run_state["added_tools"]}
+            agent.tools = [t for t in agent.tools if id(t) not in added_ids]
+        # Remove exactly the blocks THIS run injected -- order-independent
+        # and correct regardless of what other middleware (hcix, skills)
+        # injects/removes before, after, or in between. See
+        # inject_prompt_block's module docstring in autourgos-agent.
+        for block in run_state["injected_blocks"]:
+            remove_prompt_block(agent, block)
         if self._last_agent is agent:
             self._last_agent = None
