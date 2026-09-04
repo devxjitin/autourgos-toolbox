@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import unittest
 from unittest.mock import MagicMock
 
@@ -406,6 +407,49 @@ class ToolboxMiddlewareTests(unittest.TestCase):
         # cross-toolbox collision check against itself
         middleware.add_toolbox("github", "updated", [search_issues, create_pr])
         self.assertIn("create_pr", {t.__name__ for t in middleware.toolboxes["github"].tools})
+
+    def test_two_concurrent_agents_share_one_middleware_without_state_clash(self):
+        """
+        Sprint 5 regression: ToolboxMiddleware is commonly a single shared
+        instance handed to multiple agents. Its per-run state (self._runs,
+        now a PerAgentRegistry) must stay isolated by agent identity even
+        when two agents' on_agent_start/expose/on_agent_end calls interleave
+        on separate threads -- one agent's exposed toolbox must never leak
+        into, or get clobbered by, the other's.
+        """
+        middleware = _build_middleware()
+        agent_a = make_test_agent(middleware=[middleware])
+        agent_b = make_test_agent(middleware=[middleware])
+
+        errors = []
+        barrier = threading.Barrier(2)
+
+        def drive(agent, toolbox_name, other_toolbox_name):
+            try:
+                middleware.on_agent_start("query", agent=agent)
+                barrier.wait(timeout=5)
+                middleware._expose_toolbox_action(toolbox_name, agent=agent)
+                for _ in range(20):
+                    names = set(_tool_names(agent))
+                    if other_toolbox_name == "database":
+                        assert "run_query" not in names, "agent_a saw agent_b's tool"
+                    else:
+                        assert "search_issues" not in names, "agent_b saw agent_a's tool"
+                middleware.on_agent_end("done", agent=agent)
+            except Exception as exc:  # pragma: no cover - surfaced via errors list
+                errors.append(exc)
+
+        t_a = threading.Thread(target=drive, args=(agent_a, "github", "database"))
+        t_b = threading.Thread(target=drive, args=(agent_b, "database", "github"))
+        t_a.start()
+        t_b.start()
+        t_a.join(timeout=10)
+        t_b.join(timeout=10)
+
+        self.assertEqual(errors, [])
+        # both runs restored cleanly -- no leftover toolbox tools on either agent
+        self.assertNotIn("search_issues", _tool_names(agent_a))
+        self.assertNotIn("run_query", _tool_names(agent_b))
 
 
 if __name__ == "__main__":

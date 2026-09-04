@@ -8,8 +8,9 @@ to lazy-load the actual tools it needs.
 from __future__ import annotations
 
 import logging
-import weakref
 from typing import Any, Dict, List, Optional, Union
+
+from autourgos_core import PerAgentRegistry
 
 from .base import CallbackHandler, StructuredTool, build_tool_list, register_tool
 
@@ -139,7 +140,7 @@ class ToolboxMiddleware(CallbackHandler):
         # restore the wrong agent's tools on on_agent_end. WeakKeyDictionary
         # also means a run's entry is freed automatically if its agent is
         # garbage-collected without on_agent_end ever firing.
-        self._runs: "weakref.WeakKeyDictionary[Any, Dict[str, Any]]" = weakref.WeakKeyDictionary()
+        self._runs: "PerAgentRegistry[Dict[str, Any]]" = PerAgentRegistry()
         # Fallback target for the private _expose_toolbox_action/_expose_tool_action
         # methods when called directly without an explicit agent (e.g. tests
         # exercising a single run) -- the meta-tool closures built in
@@ -203,7 +204,7 @@ class ToolboxMiddleware(CallbackHandler):
             "exposed":                 set(),
             "exposed_tools":           set(),
         }
-        self._runs[agent] = run_state
+        self._runs.set(agent, run_state)
 
         # inject meta-tools, bound to THIS run's agent explicitly so a
         # concurrent run's expose_toolbox/expose_tool calls can never act
@@ -273,7 +274,7 @@ class ToolboxMiddleware(CallbackHandler):
 
     def _expose_toolbox_action(self, toolbox_name: str, agent: Any = None) -> str:
         agent = agent or self._last_agent
-        run_state = self._runs.get(agent) if agent is not None else None
+        run_state = self._runs.peek(agent) if agent is not None else None
         if agent is None or run_state is None:
             return "Error: No active agent reference found."
 
@@ -327,7 +328,7 @@ class ToolboxMiddleware(CallbackHandler):
 
     def _expose_tool_action(self, tool_name: str, agent: Any = None) -> str:
         agent = agent or self._last_agent
-        run_state = self._runs.get(agent) if agent is not None else None
+        run_state = self._runs.peek(agent) if agent is not None else None
         if agent is None or run_state is None:
             return "Error: No active agent reference found."
 

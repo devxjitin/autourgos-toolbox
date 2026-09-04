@@ -20,7 +20,7 @@ from .middleware import Toolbox, ToolboxMiddleware
 
 from autourgos_core import package_version
 
-__version__ = package_version("autourgos-toolbox", fallback="3.3.0")
+__version__ = package_version("autourgos-toolbox", fallback="3.3.1")
 
 __all__ = [
     "Toolbox",

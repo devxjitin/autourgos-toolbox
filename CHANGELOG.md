@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.3.1] - 2026-09-05
+
+- Fixed: `self._runs` (per-agent run state) migrated from a bare `weakref.WeakKeyDictionary` to `autourgos_core.PerAgentRegistry` — closes a crash-risk gap where a non-weakly-referenceable `agent` (e.g. some test doubles) would raise `TypeError` instead of degrading safely. No behavior change for real `Agent` instances. Bumped `autourgos-core>=0.7.0`. Live-verified: two real `Agent`s (real Azure LLM) sharing one `ToolboxMiddleware` instance, concurrent `invoke()` in threads — no state clash, no leftover tools on either agent after completion.
+
 ## [3.3.0] - 2026-09-04
 
 - **Behavior change:** `StructuredTool._infer_schema()`'s inline docstring param-description scan (matched a bare `param: description` line anywhere in the docstring, no header needed) is replaced with `autourgos_core.parse_param_descriptions()` -- the same stricter algorithm `autourgos-agent`'s `@tool` decorator has always used, which requires an `Args:`/`Arguments:`/`Parameters:` header. A tool function whose docstring lacks that header now gets an empty parameter description instead of one scraped from a bare `param: description` line. This package's own tools, tests, and README example already use the header format and are unaffected; a caller supplying a header-free tool docstring will see empty descriptions where they previously weren't. Bumped `autourgos-core>=0.4.0`. Live-verified against a real Agent + real Azure LLM (`expose_toolbox`/`expose_tool`/tool-calling round trip).

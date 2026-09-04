@@ -31,6 +31,7 @@ result = agent.invoke("Find the latest Python release and log it to the database
 - **Define toolboxes three ways** — a list of `Toolbox` objects, a dict, or dynamically with `add_toolbox()`
 - **`StructuredTool`** — auto-infers a JSON schema from type annotations and docstrings
 - **Clean state per run** — `on_agent_end`/`on_agent_error` fully restore the agent's original tools + prompt
+- **Safe to share across agents** — one `ToolboxMiddleware` instance can serve multiple concurrent `Agent`s; per-agent state is isolated (`autourgos-core`'s `PerAgentRegistry`)
 - Depends on `autourgos-agent`; works with any Autourgos agent
 
 ---
