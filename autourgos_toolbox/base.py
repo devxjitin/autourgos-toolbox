@@ -15,6 +15,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from autourgos_agent import CallbackHandler
+from autourgos_core import parse_param_descriptions
 
 __all__ = ["CallbackHandler", "StructuredTool", "register_tool", "build_tool_list"]
 
@@ -69,6 +70,15 @@ class StructuredTool:
         properties: Dict[str, Any] = {}
         required:   List[str]      = []
 
+        # Requires an Args:/Arguments:/Parameters: header -- a docstring with
+        # bare "param: description" lines and no header is not parsed. This
+        # is the same stricter algorithm autourgos-agent's @tool decorator
+        # uses (unified via autourgos-core so the two don't silently diverge
+        # again); a header-free docstring that used to get its descriptions
+        # picked up here now gets an empty description instead, matching
+        # what @tool has always done.
+        param_docs = parse_param_descriptions(inspect.getdoc(func))
+
         for param_name, param in sig.parameters.items():
             if param_name in ("self", "return"):
                 continue
@@ -94,16 +104,7 @@ class StructuredTool:
                         sorted(_PY_TO_JSON),
                     )
 
-            # parse inline description from docstring "param: description" lines
-            doc   = inspect.getdoc(func) or ""
-            pdesc = ""
-            for line in doc.splitlines():
-                line = line.strip()
-                if line.startswith(f"{param_name}:") or line.startswith(f"{param_name} :"):
-                    pdesc = line.split(":", 1)[-1].strip()
-                    break
-
-            properties[param_name] = {"type": type_name, "description": pdesc}
+            properties[param_name] = {"type": type_name, "description": param_docs.get(param_name, "")}
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
 

@@ -365,6 +365,41 @@ class ToolboxMiddlewareTests(unittest.TestCase):
             logger.removeHandler(handler)
         self.assertEqual(records, [])
 
+    def test_param_description_parsed_with_args_header(self):
+        """Args:-headed docstrings (the format this package's own tools/tests
+        already use) still get their param descriptions populated."""
+
+        def headed(city: str) -> str:
+            """Get weather.
+
+            Args:
+                city: the city to check.
+            """
+            return "ok"
+
+        tool = StructuredTool.from_function(headed)
+        self.assertEqual(tool.args_schema["properties"]["city"]["description"], "the city to check.")
+
+    def test_param_description_empty_without_args_header(self):
+        """
+        Behavior change (Sprint 3b): _infer_schema()'s inline per-line scan
+        used to pick up a bare "param: description" line with no section
+        header. Now unified with autourgos-agent's @tool decorator via
+        autourgos_core.parse_param_descriptions(), which requires an
+        Args:/Arguments:/Parameters: header -- a header-free docstring now
+        gets an empty description, matching what @tool has always done.
+        """
+
+        def headerless(city: str) -> str:
+            """Get weather.
+
+            city: the city to check.
+            """
+            return "ok"
+
+        tool = StructuredTool.from_function(headerless)
+        self.assertEqual(tool.args_schema["properties"]["city"]["description"], "")
+
     def test_add_toolbox_reregistering_same_name_does_not_raise(self):
         middleware = _build_middleware()
         # updating the 'github' toolbox's own tools must not trip the

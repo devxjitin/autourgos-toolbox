@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.3.0] - 2026-09-04
+
+- **Behavior change:** `StructuredTool._infer_schema()`'s inline docstring param-description scan (matched a bare `param: description` line anywhere in the docstring, no header needed) is replaced with `autourgos_core.parse_param_descriptions()` -- the same stricter algorithm `autourgos-agent`'s `@tool` decorator has always used, which requires an `Args:`/`Arguments:`/`Parameters:` header. A tool function whose docstring lacks that header now gets an empty parameter description instead of one scraped from a bare `param: description` line. This package's own tools, tests, and README example already use the header format and are unaffected; a caller supplying a header-free tool docstring will see empty descriptions where they previously weren't. Bumped `autourgos-core>=0.4.0`. Live-verified against a real Agent + real Azure LLM (`expose_toolbox`/`expose_tool`/tool-calling round trip).
+
 ## [3.2.6] - 2026-09-04
 
 - Internal: `__version__` resolution moved to `autourgos_core.package_version()` (new `autourgos-core>=0.3.0` dependency). No functional change.
