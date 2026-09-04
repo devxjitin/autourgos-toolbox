@@ -18,11 +18,9 @@ Quick start::
 from .base import CallbackHandler, StructuredTool, build_tool_list, register_tool
 from .middleware import Toolbox, ToolboxMiddleware
 
-try:
-    from importlib.metadata import version as _meta_version
-    __version__ = _meta_version("autourgos-toolbox")
-except Exception:
-    __version__ = "3.2.5"
+from autourgos_core import package_version
+
+__version__ = package_version("autourgos-toolbox", fallback="3.2.6")
 
 __all__ = [
     "Toolbox",
