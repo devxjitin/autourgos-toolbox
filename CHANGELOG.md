@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.3.2] - 2026-09-05
+
+- Internal: `ToolboxMiddleware._get_tool_name()` no longer duplicates its own duck-typed tool-name lookup -- delegates to `autourgos_agent.base._tool_name()`, which gained a bare-callable `__name__` fallback (autourgos-agent 3.1.6) to cover the case this package's version already handled. Bumped `autourgos-agent>=3.1.6`. No behavior change.
+
 ## [3.3.1] - 2026-09-05
 
 - Fixed: `self._runs` (per-agent run state) migrated from a bare `weakref.WeakKeyDictionary` to `autourgos_core.PerAgentRegistry` — closes a crash-risk gap where a non-weakly-referenceable `agent` (e.g. some test doubles) would raise `TypeError` instead of degrading safely. No behavior change for real `Agent` instances. Bumped `autourgos-core>=0.7.0`. Live-verified: two real `Agent`s (real Azure LLM) sharing one `ToolboxMiddleware` instance, concurrent `invoke()` in threads — no state clash, no leftover tools on either agent after completion.

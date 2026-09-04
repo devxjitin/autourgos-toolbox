@@ -132,6 +132,14 @@ class ToolboxMiddlewareTests(unittest.TestCase):
         self.assertIn("Success", result)
         self.assertIn("run_query", _tool_names(agent))
 
+    def test_get_tool_name_shared_with_agent_handles_bare_callable(self):
+        """_get_tool_name delegates to autourgos_agent.base._tool_name, which
+        must still resolve a bare callable's __name__ (Toolbox.tools can hold
+        raw functions, not just dicts/StructuredTool)."""
+        middleware = _build_middleware()
+        self.assertEqual(middleware._get_tool_name(search_issues), "search_issues")
+        self.assertEqual(middleware._get_tool_name({"name": "x"}), "x")
+
     def test_expose_tool_unknown_name_returns_clear_message(self):
         middleware = _build_middleware()
         agent = make_test_agent(middleware=[middleware])

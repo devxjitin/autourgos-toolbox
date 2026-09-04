@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Union
 
+from autourgos_agent.base import _tool_name
 from autourgos_core import PerAgentRegistry
 
 from .base import CallbackHandler, StructuredTool, build_tool_list, register_tool
@@ -309,14 +310,11 @@ class ToolboxMiddleware(CallbackHandler):
 
     @staticmethod
     def _get_tool_name(tool: Any) -> Optional[str]:
-        """Best-effort extraction of a tool's name across supported tool shapes."""
-        if isinstance(tool, StructuredTool):
-            return tool.name
-        if isinstance(tool, dict):
-            return tool.get("name")
-        if callable(tool):
-            return getattr(tool, "__name__", None)
-        return None
+        """Best-effort extraction of a tool's name across supported tool
+        shapes. Shared with autourgos-agent's _tool_name (dict / .name
+        attribute / bare-callable __name__), which already covers
+        StructuredTool via its .name attribute."""
+        return _tool_name(tool)
 
     def _find_tool(self, tool_name: str) -> Optional[Any]:
         """Search every registered toolbox for a tool matching ``tool_name``."""
